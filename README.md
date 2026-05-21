@@ -117,8 +117,8 @@ bash scripts/reproduce_table3.sh
 The scripts accept `OUTPUT_ROOT` and `SEED` as positional arguments
 and read the dataset root from the `DATA_ROOT` environment variable
 (default `./data`).  Results in the paper are averaged over three
-random seeds (42, 43, 44); the provided scripts default to seed 42 as
-a sanity-check reproduction.  Single-seed results may deviate from the
+random seeds; the provided scripts default to a single seed as a
+sanity-check reproduction.  Single-seed results may deviate from the
 paper's three-seed averages by a few percent; this is expected.
 Re-run with different `SEED` values and average per-cell MSE / retrain
 count.
