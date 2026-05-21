@@ -1,0 +1,31 @@
+# Backbone architecture hyperparameters per (backbone, dataset).
+#
+# Schema:
+#   <backbone>:
+#     <dataset>:
+#       <arch_field>: <value>
+#
+# Arch fields per backbone:
+#   - dlinear:      ma_kernel
+#   - itransformer: d_model, e_layers, d_ff
+#   - timesnet:     d_model, e_layers, d_ff, top_k
+#
+# run_method.py reads this file by (backbone, dataset) and forwards the
+# values to the underlying backbone implementation.  Missing (backbone,
+# dataset) cells fall back to the backbone's standard defaults; add an
+# entry below to evaluate on additional datasets.
+
+dlinear:
+  ETTh2:   {ma_kernel: 13}
+  ETTm1:   {ma_kernel: 25}
+  Traffic: {ma_kernel: 25}
+
+itransformer:
+  ETTh2:   {d_model: 128, e_layers: 1, d_ff: 256}
+  ETTm1:   {d_model: 256, e_layers: 2, d_ff: 512}
+  Traffic: {d_model: 128, e_layers: 1, d_ff: 128}
+
+timesnet:
+  ETTh2:   {d_model: 128, e_layers: 1, d_ff: 128, top_k: 3}
+  ETTm1:   {d_model: 32,  e_layers: 1, d_ff: 32,  top_k: 3}
+  Traffic: {d_model: 32,  e_layers: 2, d_ff: 128, top_k: 3}

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Local data and run artifacts (not part of the supplement)
+data/
+outputs/
+results*/
+*.log
+*.ckpt
+*.pt
+*.pkl
+wandb/
