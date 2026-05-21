@@ -64,7 +64,7 @@ class PoolMLPEncoder(nn.Module):
 class UtilityPredictor(nn.Module):
     """
     Single-window scorer: window of standardized state vectors -> scalar
-    retraining score s_t (Equation 23).
+    retraining score s_t (Equation 20).
     """
 
     def __init__(self, config: ScorerConfig):

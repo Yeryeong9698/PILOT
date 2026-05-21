@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Reproduce Table 3 (ablation study on TimesNet × 3 datasets, paper §4.3).
+# Reproduce Table 3 (ablation study on TimesNet × 3 datasets, paper §4.6).
 #
 # Four columns:
 #   PILOT          — no ablation

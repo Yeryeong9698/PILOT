@@ -267,7 +267,7 @@ def build_binary_utility_labels(
         if len(recent) < L + H:
             n_skip += 1; continue
 
-        # Simulate retrain (paper Section 4.1: warm-restart, 5 epochs, lr * 0.1)
+        # Simulate retrain via warm-start (paper Section 3.6); 5 epochs at lr * 0.1.
         candidate = backbone_fcst.clone()
         candidate.warm_retrain(recent, epochs=5, lr_multiplier=0.1)
 

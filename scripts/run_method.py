@@ -703,7 +703,7 @@ def evaluate_method(
             if method == "pilot":
                 sc    = float(scores_arr[seg_i])
 
-                # ── Online z-score calibration (Section 3.6, Equation 24) ──
+                # ── Online z-score calibration (Section 3.6, Equation 23) ──
                 # Welford running mean / variance over the score stream.
                 _zscore_n[0] += 1
                 delta = sc - _zscore_mean[0]
@@ -714,7 +714,7 @@ def evaluate_method(
                     running_std = max((_zscore_m2[0] / _zscore_n[0]) ** 0.5, 1e-8)
                     sc_decision = (sc - _zscore_mean[0]) / running_std
                 else:
-                    # Warm-up period: triggering is disabled (Equation 24).
+                    # Warm-up period: triggering is disabled (Equation 23).
                     sc_decision = 0.0
 
                 # Single-step threshold trigger (Section 3.6, Equation 25).

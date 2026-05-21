@@ -97,7 +97,7 @@ def build_upf_training_data(
             continue
 
         candidate = backbone_fcst.clone()
-        # Paper Section 4.1: warm-restart with 5 epochs at lr * 0.1.
+        # Warm-start retraining (paper Section 3.6); 5 epochs at lr * 0.1.
         candidate.warm_retrain(recent, epochs=5, lr_multiplier=0.1)
 
         # Evaluate candidate at all future eval steps j > t_k
