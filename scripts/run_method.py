@@ -191,39 +191,22 @@ def chronological_split(data: np.ndarray, dataset_name: str):
 
 def do_retrain(
     fcst: DLinearForecaster,
-    backbone_data: np.ndarray,
     test_data: np.ndarray,
     trigger_step: int,
     retrain_window: int,
-    replay_ratio: float,  # 0.0 = recent only, 0.2 = 20% backbone tail
     lookback: int,
     horizon: int,
     test_time_features: np.ndarray = None,
-    backbone_time_features: np.ndarray = None,
 ) -> DLinearForecaster:
     """Execute one retrain event and return the updated forecaster."""
     L = lookback
     H = horizon
 
-    # --- Build retrain data (and aligned time_features) ---
     rec_start = max(0, trigger_step - retrain_window)
     rec_end = trigger_step
-    recent = test_data[rec_start:rec_end]
-    recent_tf = (test_time_features[rec_start:rec_end]
-                 if test_time_features is not None else None)
-    if replay_ratio > 0:
-        n_replay = int(len(recent) * replay_ratio / (1 - replay_ratio + 1e-9))
-        n_replay = min(n_replay, len(backbone_data))
-        replay = backbone_data[-n_replay:] if n_replay > 0 else np.zeros((0, backbone_data.shape[1]))
-        retrain_data = np.concatenate([replay, recent], axis=0) if len(replay) > 0 else recent
-        if recent_tf is not None and backbone_time_features is not None and n_replay > 0:
-            replay_tf = backbone_time_features[-n_replay:]
-            retrain_tf = np.concatenate([replay_tf, recent_tf], axis=0)
-        else:
-            retrain_tf = recent_tf
-    else:
-        retrain_data = recent
-        retrain_tf = recent_tf
+    retrain_data = test_data[rec_start:rec_end]
+    retrain_tf = (test_time_features[rec_start:rec_end]
+                  if test_time_features is not None else None)
 
     if len(retrain_data) < L + H:
         return fcst
@@ -260,7 +243,6 @@ def evaluate_method(
     data: np.ndarray,
     backbone_data: np.ndarray,
     fcst_config: DLinearConfig,
-    detector: Optional[object],
     std_stats: Optional[Dict],
     method: str,    # "no_retrain"|"periodic"|"pilot"|"adwin"|"kswin"|"cara"|"upf"
     threshold: Optional[float],
@@ -268,7 +250,6 @@ def evaluate_method(
     cooldown: int,
     min_gap: int,
     retrain_window: int,
-    replay_ratio: float,
     device: torch.device,
     window_len: int = 24,
     pre_fitted_fcst=None,
@@ -280,28 +261,11 @@ def evaluate_method(
     **kwargs,  # E0/E1/E2/E4 ablation_mode passed through here
 ) -> Tuple[Dict, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     
-    L = fcst_config.lookback if fcst_config else kwargs.get('_lookback', 96)
-    H = fcst_config.horizon if fcst_config else kwargs.get('_horizon', 96)
+    L = fcst_config.lookback
+    H = fcst_config.horizon
     T = len(data)
 
-    # Reuse pre-fitted backbone if provided (avoids re-training on every tuning call)
-    if pre_fitted_fcst is not None:
-        fcst = pre_fitted_fcst.clone()
-    elif fcst_config is not None:
-        fcst = DLinearForecaster(fcst_config)
-        fcst.fit(backbone_data)
-    else:
-        # Non-DLinear backbone: use factory
-        _bb = kwargs.get('backbone', 'dlinear')
-        _D = backbone_data.shape[1] if backbone_data.ndim > 1 else 1
-        fcst = create_forecaster(_bb, L, H, _D,
-                                  epochs=kwargs.get('backbone_epochs', 20),
-                                  ma_kernel=kwargs.get('ma_kernel', 25),
-                                  top_k=kwargs.get('top_k', 3),
-                                  d_model=kwargs.get('d_model', 64),
-                                  d_ff=kwargs.get('d_ff', 64),
-                                  e_layers=kwargs.get('e_layers', 2))
-        fcst.fit(backbone_data)
+    fcst = pre_fitted_fcst.clone()
 
     if method == "pilot" and utility_predictor is not None:
         utility_predictor.eval()
@@ -555,7 +519,6 @@ def evaluate_method(
 
     # ---- main segment loop ----
     current_step = L
-    _retrains_so_far = 0
     while current_step < T - H + 1:
 
         if method == "periodic":
@@ -580,12 +543,10 @@ def evaluate_method(
                     alarm_rows.append({"step": current_step, "score": 0.0, "alarm": 1, "sc_decision": float('nan')})
 
                     fcst = do_retrain(
-                        fcst=fcst, backbone_data=backbone_data, test_data=data,
+                        fcst=fcst, test_data=data,
                         trigger_step=current_step, retrain_window=retrain_window,
-                        replay_ratio=replay_ratio,
                         lookback=L, horizon=H,
                         test_time_features=data_time_features,
-                        backbone_time_features=backbone_time_features,
                     )
                     retrain_id += 1
                     last_retrain = current_step
@@ -719,24 +680,17 @@ def evaluate_method(
         alarm_step = roll[first_alarm_idx]["t"]
 
         # Pre-check: skip silently if not enough data for retrain (avoid wasting retrain count)
-        _recent_len = len(data[max(0, alarm_step - retrain_window): alarm_step])
-        if replay_ratio > 0:
-            _n_replay = min(int(_recent_len * replay_ratio / (1 - replay_ratio + 1e-9)), len(backbone_data))
-            _retrain_len = _recent_len + _n_replay
-        else:
-            _retrain_len = _recent_len
+        _retrain_len = len(data[max(0, alarm_step - retrain_window): alarm_step])
         if _retrain_len < L + H:
             # Not enough data yet — skip alarm without counting as retrain or consuming cooldown
             current_step = alarm_step + 1
             continue
 
         fcst = do_retrain(
-            fcst=fcst, backbone_data=backbone_data, test_data=data,
+            fcst=fcst, test_data=data,
             trigger_step=alarm_step, retrain_window=retrain_window,
-            replay_ratio=replay_ratio,
             lookback=L, horizon=H,
             test_time_features=data_time_features,
-            backbone_time_features=backbone_time_features,
         )
         retrain_id += 1
         last_retrain = alarm_step
@@ -826,10 +780,10 @@ def tune_and_eval_baselines(
 
     common = dict(
         backbone_data=bb_data, fcst_config=fcst_config,
-        detector=None, std_stats=std_stats,
+        std_stats=std_stats,
         cooldown=args.cooldown, min_gap=20,
         retrain_window=args.retrain_window,
-        replay_ratio=0.0, device=device,
+        device=device,
         pre_fitted_fcst=fcst, state_mode=state_mode,
     )
 
@@ -841,7 +795,7 @@ def tune_and_eval_baselines(
         save_run(
             out_dir, summary, pred_df, retrain_df, alarm_df,
             {"method": method_name,
-             "retrain_window": args.retrain_window, "replay_ratio": 0.0},
+             "retrain_window": args.retrain_window},
             tuned,
         )
 
@@ -1081,9 +1035,8 @@ def evaluate_voting(
 
         if fired:
             fcst = do_retrain(
-                fcst=fcst, backbone_data=bb_data, test_data=data,
+                fcst=fcst, test_data=data,
                 trigger_step=current_step, retrain_window=retrain_window,
-                replay_ratio=0.0,
                 lookback=L, horizon=H,
             )
             n_retrains += 1
@@ -1115,12 +1068,12 @@ def evaluate_voting(
 # ---------------------------------------------------------------------------
 
 def run_pilot(args, dataset: str, seed: int, device: torch.device,
-                best_window: int, best_replay: float) -> Dict:
+                best_window: int) -> Dict:
     _log(f"[{_ts()}] === PILOT evaluation: {dataset} seed={seed} ===")
     torch.manual_seed(seed)
     np.random.seed(seed)
     data, _ = load_dataset(Path(args.benchmarks_dir), dataset)
-    T, D = data.shape
+    D = data.shape[1]
     bb_data, det_data, val_data, test_data = chronological_split(data, dataset_name=dataset)
     bb_data, det_data, val_data, test_data = normalize_splits(bb_data, det_data, val_data, test_data)
 
@@ -1145,7 +1098,7 @@ def run_pilot(args, dataset: str, seed: int, device: torch.device,
                                  d_ff=args.d_ff, e_layers=args.e_layers,
                                  batch_size=_bb_bs, lr=_bb_lr)
 
-    _tf_bb = _tf_det = _tf_val = _tf_test = _tf_val_full = None
+    _tf_bb = _tf_val = _tf_test = None
     _val_full_train = (
         np.concatenate([det_data, val_data], axis=0)
         if len(det_data) > 0 else val_data
@@ -1291,11 +1244,11 @@ def run_pilot(args, dataset: str, seed: int, device: torch.device,
             best_tau_pilot = z_tau
             _s, _, _, _ = evaluate_method(
                 data=val_data, backbone_data=bb_data, fcst_config=fcst_config,
-                detector=None, std_stats=std_stats,
+                std_stats=std_stats,
                 method="pilot", threshold=z_tau, periodic_interval=None,
                 cooldown=args.cooldown, min_gap=args.min_gap,
                 retrain_window=best_window,
-                replay_ratio=best_replay, device=device,
+                device=device,
                 pre_fitted_fcst=bb_fcst,
                 state_mode=state_mode,
                 utility_predictor=scorer,
@@ -1317,12 +1270,12 @@ def run_pilot(args, dataset: str, seed: int, device: torch.device,
             summary_p, pred_p, retrain_p, alarm_p = evaluate_method(
                 data=test_data, backbone_data=bb_data,
                 fcst_config=fcst_config,
-                detector=None, std_stats=std_stats,
+                std_stats=std_stats,
                 method="pilot", threshold=best_tau_pilot,
                 periodic_interval=None,
                 cooldown=args.cooldown, min_gap=args.min_gap,
                 retrain_window=best_window,
-                replay_ratio=best_replay, device=device,
+                device=device,
                 pre_fitted_fcst=bb_fcst,
                 state_mode=state_mode,
                 utility_predictor=scorer,
@@ -1341,7 +1294,7 @@ def run_pilot(args, dataset: str, seed: int, device: torch.device,
                           "pilot" / f"seed_{seed}")
             save_run(out_dir_p, summary_p, pred_p, retrain_p, alarm_p,
                      {"method": "pilot",
-                      "retrain_window": best_window, "replay_ratio": best_replay},
+                      "retrain_window": best_window},
                      {"threshold": best_tau_pilot, "label_type": _lbl})
 
     _log(f"[{_ts()}]   [MULTI-LABEL] All {len(_label_list)} labels done for {dataset}.")
@@ -1386,7 +1339,7 @@ def run_pilot(args, dataset: str, seed: int, device: torch.device,
         out_dir_vote = Path(_orig_output_dir.rstrip('/') + "_voting") / "results" / dataset / "voting" / f"seed_{seed}"
         save_run(out_dir_vote, st, pred_v, retrain_v, alarm_v,
                  {"method": "voting",
-                  "retrain_window": best_window, "replay_ratio": 0.0},
+                  "retrain_window": best_window},
                  {"q": int(best_q), "val_j": float(best_q_j),
                   "z_tau": float(z_tau)})
 
@@ -1468,7 +1421,6 @@ def main():
     for ds in args.datasets:
         best_settings[ds] = {
             "window": args.retrain_window,
-            "replay": 0.0,
         }
 
     for dataset in args.datasets:
@@ -1507,8 +1459,7 @@ def main():
             _log(f"  [LabelWindow] future={args.label_future_hours}h → {args.label_future_window} steps")
 
         rg = run_pilot(args, dataset, seed, device,
-                         best_window=bs["window"],
-                         best_replay=bs["replay"])
+                         best_window=bs["window"])
         for m, s in rg.items():
             reattach_rows.append({**s, "method": m})
 
