@@ -1,7 +1,7 @@
 """Trigger-quality metrics for the paper's Table 2.
 
 Given the per-step MSE stream of the No-Retrain baseline as the reference,
-and a method's accepted retrain events, compute four quality metrics:
+and a method's retrain events, compute four quality metrics:
 
 * Precision      — fraction of triggers where utility(t) > 0.
 * Trig.Need      — mean relative utility ``utility(t) / past_mean(t)`` at trigger steps.
@@ -73,8 +73,8 @@ def compute_trigger_quality(
     no_retrain_predictions
         ``predictions.csv`` of the No-Retrain run (columns ``step`` and ``mse``).
     method_retrains
-        ``retrains.csv`` of the candidate method.  Only rows with
-        ``accepted == 1`` are treated as triggers.
+        ``retrains.csv`` of the candidate method.  Each row is treated
+        as one trigger.
     step_hours
         Sampling interval of the dataset, in hours per step.
     window_hours
@@ -86,11 +86,8 @@ def compute_trigger_quality(
     window = max(1, round(window_hours / step_hours))
     util, past = _utility_streams(mse, window)
 
-    if "accepted" in method_retrains.columns:
-        trigger_rows = method_retrains.loc[method_retrains["accepted"] == 1]
-    else:
-        trigger_rows = method_retrains
-    trigger_steps = trigger_rows["trigger_step"].dropna().astype(int).tolist()
+    trigger_steps = method_retrains["trigger_step"].dropna().astype(int).tolist()
+    trigger_steps = [t for t in trigger_steps if t >= 0]
 
     out = {"precision": float("nan"), "trig_need": float("nan"),
            "ep_hit": float("nan"), "det_lag_hours": float("nan"),

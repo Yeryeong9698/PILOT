@@ -457,7 +457,7 @@ class DLinearForecaster(BaseForecaster):
         return self
 
     def clone(self) -> "DLinearForecaster":
-        """Return a deep copy of this forecaster (for acceptance gate candidate cloning)."""
+        """Return a deep copy of this forecaster."""
         import copy
         return copy.deepcopy(self)
 

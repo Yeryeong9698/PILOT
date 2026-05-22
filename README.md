@@ -64,7 +64,7 @@ results are written to
 `./outputs/timesnet_ETTm1_<label>/results/<dataset>/<method>/seed_<N>/{metrics,predictions,retrains,alarms,tuned_params,config}.*`.
 
 Each `metrics.json` contains the test-set `mse`, `mae`,
-`cumulative_mse`, `retrain_count`, and `accepted_count`.
+`cumulative_mse`, `retrain_count`, and `alarm_count`.
 `tuned_params.json` records the hyperparameter selected on the
 validation split.
 

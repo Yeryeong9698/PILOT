@@ -196,17 +196,12 @@ def do_retrain(
     trigger_step: int,
     retrain_window: int,
     replay_ratio: float,  # 0.0 = recent only, 0.2 = 20% backbone tail
-    acceptance_delta: float,  # -1 = no gate, 0.0 = strict, 0.001*baseline...
-    baseline_mse: float,      # used for delta scaling
     lookback: int,
     horizon: int,
     test_time_features: np.ndarray = None,
     backbone_time_features: np.ndarray = None,
-) -> Tuple[DLinearForecaster, bool, float]:
-    """
-    Execute one retrain event.
-    Returns (updated_fcst, was_accepted, candidate_mse).
-    """
+) -> DLinearForecaster:
+    """Execute one retrain event and return the updated forecaster."""
     L = lookback
     H = horizon
 
@@ -231,53 +226,13 @@ def do_retrain(
         retrain_tf = recent_tf
 
     if len(retrain_data) < L + H:
-        return fcst, False, float("nan")
+        return fcst
 
-    # --- Acceptance gate: hold out tail as acceptance set ---
-    if acceptance_delta >= 0 and len(retrain_data) >= 2 * (L + H):
-        accept_len = min(L + H, len(retrain_data) // 4)
-        accept_data = retrain_data[-accept_len:]
-        train_data_for_retrain = retrain_data[:-accept_len]
-        train_tf_for_retrain = (retrain_tf[:-accept_len] if retrain_tf is not None else None)
-        if len(train_data_for_retrain) < L + H:
-            train_data_for_retrain = retrain_data
-            train_tf_for_retrain = retrain_tf
-            accept_data = None
-    else:
-        train_data_for_retrain = retrain_data
-        train_tf_for_retrain = retrain_tf
-        accept_data = None
-
-    # --- Clone candidate, retrain ---
     candidate = fcst.clone()
-
-    _retrain_kw = {"time_features": train_tf_for_retrain} if train_tf_for_retrain is not None else {}
-    candidate.warm_retrain(train_data_for_retrain, epochs=5,
+    _retrain_kw = {"time_features": retrain_tf} if retrain_tf is not None else {}
+    candidate.warm_retrain(retrain_data, epochs=5,
                            lr_multiplier=0.1, **_retrain_kw)
-
-    # --- Acceptance gate evaluation ---
-    candidate_mse = float("nan")
-    if acceptance_delta >= 0 and accept_data is not None and len(accept_data) >= L + H:
-        # evaluate both models on acceptance set
-        def eval_on_window(model: DLinearForecaster, data_seg: np.ndarray) -> float:
-            mses = []
-            for t in range(L, len(data_seg) - H + 1):
-                win = data_seg[t - L: t]
-                y_true = data_seg[t: t + H]
-                pred = model.predict_single(win)
-                mses.append(float(np.mean((y_true - pred["yhat"]) ** 2)))
-            return float(np.mean(mses)) if mses else float("nan")
-
-        current_mse = eval_on_window(fcst, accept_data)
-        candidate_mse = eval_on_window(candidate, accept_data)
-
-        delta_threshold = acceptance_delta * baseline_mse
-        if np.isnan(candidate_mse) or candidate_mse > current_mse - delta_threshold:
-            return fcst, False, candidate_mse   # rejected
-        return candidate, True, candidate_mse
-    else:
-        # No gate: always accept
-        return candidate, True, candidate_mse
+    return candidate
 
 from src.baselines.adwin import (
     ADWIN as _ADWIN,
@@ -314,7 +269,6 @@ def evaluate_method(
     min_gap: int,
     retrain_window: int,
     replay_ratio: float,
-    acceptance_delta: float,
     device: torch.device,
     window_len: int = 24,
     pre_fitted_fcst=None,
@@ -349,17 +303,6 @@ def evaluate_method(
                                   e_layers=kwargs.get('e_layers', 2))
         fcst.fit(backbone_data)
 
-    # Compute baseline MSE on backbone tail for acceptance gate scaling
-    baseline_mse = 1.0
-    if acceptance_delta >= 0:
-        try:
-            bb_tail = backbone_data[-(L * 4):]
-            res_list = fcst.rolling_predict(bb_tail, start=L)
-            if res_list:
-                baseline_mse = float(np.mean([np.mean((r["y_true"] - r["yhat"])**2) for r in res_list]))
-        except Exception:
-            pass
-
     if method == "pilot" and utility_predictor is not None:
         utility_predictor.eval()
 
@@ -374,8 +317,6 @@ def evaluate_method(
 
     last_retrain = -999_999
     retrain_id = 0
-    n_accepted = 0
-    n_rejected = 0
     total_runtime = 0.0
 
     # ── Early Exit for Baselines ──────────────────────────
@@ -390,7 +331,7 @@ def evaluate_method(
         if not res_list:
             summary = {
                 "mse": float("nan"), "mae": float("nan"), "cumulative_mse": float("nan"),
-                "retrain_count": 0, "alarm_count": 0, "accepted_count": 0, "rejected_count": 0,
+                "retrain_count": 0, "alarm_count": 0,
                 "runtime": total_runtime,
             }
             return summary, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -416,8 +357,6 @@ def evaluate_method(
             "cumulative_mse": float(mse_arr.sum()) if len(mse_arr) else float("nan"),
             "retrain_count": 0,
             "alarm_count": 0,
-            "accepted_count": 0,
-            "rejected_count": 0,
             "runtime": total_runtime,
         }
         return summary, pred_df, pd.DataFrame(), pd.DataFrame()
@@ -638,30 +577,20 @@ def evaluate_method(
                     mse_s = float(np.mean((y_true - yhat) ** 2))
                     mae_s = float(np.mean(np.abs(y_true - yhat)))
                     predictions.append({"step": current_step, "mse": mse_s, "mae": mae_s, "retrain_flag": 0})
-                    alarm_rows.append({"step": current_step, "score": 0.0, "alarm": 1, "accepted": 0, "sc_decision": float('nan')})
+                    alarm_rows.append({"step": current_step, "score": 0.0, "alarm": 1, "sc_decision": float('nan')})
 
-                    fcst, was_accepted, cand_mse = do_retrain(
+                    fcst = do_retrain(
                         fcst=fcst, backbone_data=backbone_data, test_data=data,
                         trigger_step=current_step, retrain_window=retrain_window,
                         replay_ratio=replay_ratio,
-                        acceptance_delta=acceptance_delta, baseline_mse=baseline_mse,
                         lookback=L, horizon=H,
                         test_time_features=data_time_features,
                         backbone_time_features=backbone_time_features,
                     )
                     retrain_id += 1
-                    if was_accepted:
-                        last_retrain = current_step
-                        n_accepted += 1
-                        retrain_rows.append({"retrain_id": retrain_id, "trigger_step": current_step,
-                                             "accepted": 1, "candidate_mse": cand_mse,
-                                             "retrain_window": retrain_window})
-                        alarm_rows[-1]["accepted"] = 1
-                    else:
-                        n_rejected += 1
-                        retrain_rows.append({"retrain_id": -1, "trigger_step": current_step,
-                                             "accepted": 0, "candidate_mse": cand_mse,
-                                             "retrain_window": retrain_window})
+                    last_retrain = current_step
+                    retrain_rows.append({"retrain_id": retrain_id, "trigger_step": current_step,
+                                         "retrain_window": retrain_window})
                 current_step += 1
                 continue
 
@@ -682,7 +611,7 @@ def evaluate_method(
                 mse_s = float(np.mean((r["y_true"] - r["yhat"]) ** 2))
                 mae_s = float(np.mean(np.abs(r["y_true"] - r["yhat"])))
                 predictions.append({"step": t, "mse": mse_s, "mae": mae_s, "retrain_flag": 0})
-                alarm_rows.append({"step": t, "score": 0.0, "alarm": 0, "accepted": 0, "sc_decision": float('nan')})
+                alarm_rows.append({"step": t, "score": 0.0, "alarm": 0, "sc_decision": float('nan')})
             current_step = seg_end
             continue
 
@@ -772,7 +701,7 @@ def evaluate_method(
             mae_s = float(np.mean(np.abs(r["y_true"] - r["yhat"])))
             predictions.append({"step": step, "mse": mse_s, "mae": mae_s, "retrain_flag": 0})
             _sc_dec = float(sc_decision) if method == "pilot" and 'sc_decision' in dir() else float('nan')
-            alarm_rows.append({"step": step, "score": float(scores_arr[seg_i]), "alarm": int(alarm), "accepted": 0, "sc_decision": _sc_dec})
+            alarm_rows.append({"step": step, "score": float(scores_arr[seg_i]), "alarm": int(alarm), "sc_decision": _sc_dec})
 
             # For pilot: commit state history up to (and including) this step
             if method == "pilot" and seg_i < len(raw_seg):
@@ -801,43 +730,32 @@ def evaluate_method(
             current_step = alarm_step + 1
             continue
 
-        fcst, was_accepted, cand_mse = do_retrain(
+        fcst = do_retrain(
             fcst=fcst, backbone_data=backbone_data, test_data=data,
             trigger_step=alarm_step, retrain_window=retrain_window,
             replay_ratio=replay_ratio,
-            acceptance_delta=acceptance_delta, baseline_mse=baseline_mse,
             lookback=L, horizon=H,
             test_time_features=data_time_features,
             backbone_time_features=backbone_time_features,
         )
         retrain_id += 1
-        _retrains_so_far += 1
-        if was_accepted:
-            last_retrain = alarm_step
-            n_accepted  += 1
-            retrain_rows.append({"retrain_id": retrain_id, "trigger_step": alarm_step,
-                                  "accepted": 1, "candidate_mse": cand_mse,
-                                  "retrain_window": retrain_window})
-            alarm_rows[-1]["accepted"] = 1
-            predictions[-1]["retrain_flag"] = 1
-            # Notify stateful baselines of accepted retrain.
-            if method == "cara" and _cara_decider is not None:
-                _cara_decider.notify_retrain()
-            elif method == "upf" and _upf is not None:
-                if _upf.decider is not None:
-                    _upf.notify_retrain(_upf.decider._current_step)
-        else:
-            n_rejected += 1
-            retrain_rows.append({"retrain_id": -1, "trigger_step": alarm_step,
-                                  "accepted": 0, "candidate_mse": cand_mse,
-                                  "retrain_window": retrain_window})
+        last_retrain = alarm_step
+        retrain_rows.append({"retrain_id": retrain_id, "trigger_step": alarm_step,
+                             "retrain_window": retrain_window})
+        predictions[-1]["retrain_flag"] = 1
+        # Notify stateful baselines of the retrain event.
+        if method == "cara" and _cara_decider is not None:
+            _cara_decider.notify_retrain()
+        elif method == "upf" and _upf is not None:
+            if _upf.decider is not None:
+                _upf.notify_retrain(_upf.decider._current_step)
 
         current_step = alarm_step + 1
 
     pred_df = pd.DataFrame(predictions)
     retrain_df = pd.DataFrame(retrain_rows if retrain_rows else
-                              [{"retrain_id": 0, "trigger_step": -1, "accepted": 0,
-                                "candidate_mse": float("nan"), "retrain_window": retrain_window}])
+                              [{"retrain_id": 0, "trigger_step": -1,
+                                "retrain_window": retrain_window}])
     alarm_df = pd.DataFrame(alarm_rows)
 
     mse_arr = pred_df["mse"].values
@@ -850,8 +768,6 @@ def evaluate_method(
         "cumulative_mse": float(mse_arr.sum()) if len(mse_arr) else float("nan"),
         "retrain_count": len(retrain_steps),
         "alarm_count": int(alarm_df["alarm"].sum()),
-        "accepted_count": n_accepted,
-        "rejected_count": n_rejected,
         "runtime": total_runtime,
     }
     return summary, pred_df, retrain_df, alarm_df
@@ -913,7 +829,7 @@ def tune_and_eval_baselines(
         detector=None, std_stats=std_stats,
         cooldown=args.cooldown, min_gap=20,
         retrain_window=args.retrain_window,
-        replay_ratio=0.0, acceptance_delta=-1, device=device,
+        replay_ratio=0.0, device=device,
         pre_fitted_fcst=fcst, state_mode=state_mode,
     )
 
@@ -925,8 +841,7 @@ def tune_and_eval_baselines(
         save_run(
             out_dir, summary, pred_df, retrain_df, alarm_df,
             {"method": method_name,
-             "retrain_window": args.retrain_window, "replay_ratio": 0.0,
-             "acceptance_delta": -1},
+             "retrain_window": args.retrain_window, "replay_ratio": 0.0},
             tuned,
         )
 
@@ -1165,39 +1080,32 @@ def evaluate_voting(
                             "alarm": int(fired)})
 
         if fired:
-            fcst, accepted, _ = do_retrain(
+            fcst = do_retrain(
                 fcst=fcst, backbone_data=bb_data, test_data=data,
                 trigger_step=current_step, retrain_window=retrain_window,
-                 replay_ratio=0.0,
-                acceptance_delta=-1, baseline_mse=1.0,
+                replay_ratio=0.0,
                 lookback=L, horizon=H,
             )
-            if accepted:
-                n_retrains += 1
-                last_retrain = current_step
-                retrains.append({"retrain_id": n_retrains,
-                                 "trigger_step": int(current_step),
-                                 "accepted": 1,
-                                 "retrain_window": int(retrain_window),
-})
-                predictions[-1]["retrain_flag"] = 1
-                for lbl in scorers:
-                    z_windows[lbl].clear()
+            n_retrains += 1
+            last_retrain = current_step
+            retrains.append({"retrain_id": n_retrains,
+                             "trigger_step": int(current_step),
+                             "retrain_window": int(retrain_window)})
+            predictions[-1]["retrain_flag"] = 1
+            for lbl in scorers:
+                z_windows[lbl].clear()
         current_step += 1
 
     pred_df = pd.DataFrame(predictions)
     retrain_df = pd.DataFrame(retrains if retrains else
-                              [{"retrain_id": 0, "trigger_step": -1, "accepted": 0,
-                                "retrain_window": int(retrain_window),
-}])
+                              [{"retrain_id": 0, "trigger_step": -1,
+                                "retrain_window": int(retrain_window)}])
     alarm_df = pd.DataFrame(alarms)
     summary = {
         "mse": float(pred_df["mse"].mean()) if len(pred_df) else float("nan"),
         "mae": float(pred_df["mae"].mean()) if len(pred_df) else float("nan"),
         "retrain_count": n_retrains,
         "alarm_count": int(alarm_df["alarm"].sum()) if len(alarm_df) else 0,
-        "accepted_count": n_retrains,
-        "rejected_count": 0,
         "runtime": 0.0,
     }
     return summary, pred_df, retrain_df, alarm_df
@@ -1207,8 +1115,7 @@ def evaluate_voting(
 # ---------------------------------------------------------------------------
 
 def run_pilot(args, dataset: str, seed: int, device: torch.device,
-                best_window: int, best_replay: float,
-                best_delta: float) -> Dict:
+                best_window: int, best_replay: float) -> Dict:
     _log(f"[{_ts()}] === PILOT evaluation: {dataset} seed={seed} ===")
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -1388,7 +1295,7 @@ def run_pilot(args, dataset: str, seed: int, device: torch.device,
                 method="pilot", threshold=z_tau, periodic_interval=None,
                 cooldown=args.cooldown, min_gap=args.min_gap,
                 retrain_window=best_window,
-                replay_ratio=best_replay, acceptance_delta=best_delta, device=device,
+                replay_ratio=best_replay, device=device,
                 pre_fitted_fcst=bb_fcst,
                 state_mode=state_mode,
                 utility_predictor=scorer,
@@ -1415,7 +1322,7 @@ def run_pilot(args, dataset: str, seed: int, device: torch.device,
                 periodic_interval=None,
                 cooldown=args.cooldown, min_gap=args.min_gap,
                 retrain_window=best_window,
-                replay_ratio=best_replay, acceptance_delta=best_delta, device=device,
+                replay_ratio=best_replay, device=device,
                 pre_fitted_fcst=bb_fcst,
                 state_mode=state_mode,
                 utility_predictor=scorer,
@@ -1434,8 +1341,7 @@ def run_pilot(args, dataset: str, seed: int, device: torch.device,
                           "pilot" / f"seed_{seed}")
             save_run(out_dir_p, summary_p, pred_p, retrain_p, alarm_p,
                      {"method": "pilot",
-                      "retrain_window": best_window, "replay_ratio": best_replay,
-                      "acceptance_delta": best_delta},
+                      "retrain_window": best_window, "replay_ratio": best_replay},
                      {"threshold": best_tau_pilot, "label_type": _lbl})
 
     _log(f"[{_ts()}]   [MULTI-LABEL] All {len(_label_list)} labels done for {dataset}.")
@@ -1480,8 +1386,7 @@ def run_pilot(args, dataset: str, seed: int, device: torch.device,
         out_dir_vote = Path(_orig_output_dir.rstrip('/') + "_voting") / "results" / dataset / "voting" / f"seed_{seed}"
         save_run(out_dir_vote, st, pred_v, retrain_v, alarm_v,
                  {"method": "voting",
-                  "retrain_window": best_window, "replay_ratio": 0.0,
-                  "acceptance_delta": -1},
+                  "retrain_window": best_window, "replay_ratio": 0.0},
                  {"q": int(best_q), "val_j": float(best_q_j),
                   "z_tau": float(z_tau)})
 
@@ -1564,7 +1469,6 @@ def main():
         best_settings[ds] = {
             "window": args.retrain_window,
             "replay": 0.0,
-            "delta": -1,  # no acceptance gate
         }
 
     for dataset in args.datasets:
@@ -1604,7 +1508,7 @@ def main():
 
         rg = run_pilot(args, dataset, seed, device,
                          best_window=bs["window"],
-                         best_replay=bs["replay"], best_delta=bs["delta"])
+                         best_replay=bs["replay"])
         for m, s in rg.items():
             reattach_rows.append({**s, "method": m})
 
