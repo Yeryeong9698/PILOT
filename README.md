@@ -2,8 +2,8 @@
 
 
 <div align="center">
-    <!-- <h3>PILOT: Pseudo-Label Retraining from Forecast Errors for Online Time Series Forecasting</h3> -->
-    <h4>CIKM 2026 (submission)</h4>
+    <h3>PILOT: Pseudo-Label Retraining from Forecast Errors for Online Time Series Forecasting</h3>
+    <!-- <h4>CIKM 2026 (submission)</h4> -->
     <!-- figure -->
     <!-- <br> -->
     <img src="https://anonymous.4open.science/r/PILOT-B641/pic/Overall_framework_of_PILOT.jpg" alt="PILOT Framework" width="600"/>
