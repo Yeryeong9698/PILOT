@@ -1,33 +1,36 @@
-# PILOT: Pseudo-Label Retraining from Forecast Errors for Online Time Series Forecasting
+# PILOT (Pseudo-label-Informed Learned Online Trigger)
+
+
+<div align="center">
+    <!-- <h3>PILOT: Pseudo-Label Retraining from Forecast Errors for Online Time Series Forecasting</h3> -->
+    <h4>CIKM 2026 (submission)</h4>
+    <!-- figure -->
+    <!-- <br> -->
+    <img src="https://anonymous.4open.science/r/PILOT-B641/pic/Overall_framework_of_PILOT.jpg" alt="PILOT Framework" width="600"/>
+
+</div>
 
 Code supplement for the CIKM 2026 submission.
 
-This supplement provides a self-contained reproducer covering **three
-datasets (ETTh2, ETTm1, Traffic)** across **three forecasting backbones
-(DLinear, iTransformer, TimesNet)** — nine (backbone, dataset) cells in
-total.  Configurations for the additional cells reported in the paper
-follow each backbone's original recommended training setup and are
-available upon request.
+This supplement provides a self-contained reproducer covering **three datasets (ETTh2, ETTm1, Traffic)** across **three forecasting backbones (DLinear, iTransformer, TimesNet)** — nine (backbone, dataset) cells in total.  
+Configurations for the additional cells reported in the paper follow each backbone's original recommended training setup and are available upon request.
 
 ## 1. Setup
 
 - Python 3.10 or newer.
 - Create a virtual environment, then install dependencies:
-  ```
+  ```bash
   pip install -r requirements.txt
   ```
 - PyTorch ≥ 2.0 (CUDA optional but recommended).
 
 ## 2. Data
 
-Each of the three datasets is available from the public
-Time-Series-Library [1] release.  Place the CSV files under
-`./data/<dataset>/Y_df.csv` (or pass a custom path via
-`--benchmarks_dir`).  Splits follow the standard convention used in
-long-term forecasting work: ETT 60/20/20, others 70/10/20
-(train/val/test); the validation slice is further halved to obtain a
-scorer-training split.  See `chronological_split()` in
-`scripts/run_method.py`.
+Each of the three datasets is available from the public Time-Series-Library [1] release.  
+Place the CSV files under `./data/<dataset>/Y_df.csv` (or pass a custom path via `--benchmarks_dir`).  
+Splits follow the standard convention used in long-term forecasting work: ETT 60/20/20, others 70/10/20 (train/val/test); 
+the validation slice is further halved to obtain a scorer-training split.  
+See `chronological_split()` in `scripts/run_method.py`.
 
 ## 3. Forecasting backbones
 
@@ -38,18 +41,14 @@ families:
 - **iTransformer** [3] — Transformer family
 - **TimesNet** [4] — convolutional family
 
-iTransformer and TimesNet use the official Time-Series-Library model
-architectures, vendored under `tslib/`.  DLinear is implemented in
-`src/forecasting/dlinear.py`.  All training in this supplement uses the
-training code in `scripts/run_method.py`; backbone architecture
-hyperparameters per cell live in `configs/backbone_arch.yaml`.  The
-backbone is trained on the first split only and shared across all
-retraining methods, so performance differences are attributable solely
-to each method's retraining policy.
+iTransformer and TimesNet use the official Time-Series-Library model architectures, vendored under `tslib/`.  
+DLinear is implemented in `src/forecasting/dlinear.py`.  
+All training in this supplement uses the training code in `scripts/run_method.py`; backbone architecture hyperparameters per cell live in `configs/backbone_arch.yaml`.  
+The backbone is trained on the first split only and shared across all retraining methods, so performance differences are attributable solely to each method's retraining policy.
 
 ## 4. Run PILOT on a single (backbone, dataset)
 
-```
+```bash
 python scripts/run_method.py \
   --backbone timesnet --datasets ETTm1 --seed 42 \
   --label_types mean_deg,cum_deg,rel_deg,binary_utility,ordinal_utility \
@@ -57,22 +56,19 @@ python scripts/run_method.py \
   --output_dir ./outputs/timesnet_ETTm1
 ```
 
-The command runs the full PILOT pipeline (five single-label scorers
-plus the voting variant) together with all six baselines (No Retrain,
-Periodic, ADWIN, KSWIN, CARA, UPF) on the specified cell.  Per-method
-results are written to
+The command runs the full PILOT pipeline (five single-label scorers plus the voting variant) together with all six baselines (No Retrain,
+Periodic, ADWIN, KSWIN, CARA, UPF) on the specified cell.  
+Per-method results are written to
 `./outputs/timesnet_ETTm1_<label>/results/<dataset>/<method>/seed_<N>/{metrics,predictions,retrains,alarms,tuned_params,config}.*`.
 
-Each `metrics.json` contains the test-set `mse`, `mae`,
-`cumulative_mse`, `retrain_count`, and `alarm_count`.
-`tuned_params.json` records the hyperparameter selected on the
-validation split.
+Each `metrics.json` contains the test-set `mse`, `mae`, `cumulative_mse`, `retrain_count`, and `alarm_count`.
+`tuned_params.json` records the hyperparameter selected on the validation split.
 
 ## 5. Evaluating on additional datasets
 
-The pipeline accepts any multivariate time series in the
-Time-Series-Library [1] CSV format (a `date` column followed by variate
-columns).  To run PILOT on a dataset other than the three listed above:
+The pipeline accepts any multivariate time series in the Time-Series-Library [1] CSV format 
+(a `date` column followed by variate columns).  
+To run PILOT on a dataset other than the three listed above:
 
 1. Place the CSV at `<benchmarks_dir>/<dataset>/Y_df.csv`.
 2. (Optional) Add an entry in `configs/backbone_arch.yaml` to pin
@@ -89,7 +85,8 @@ recommended setup and can be provided upon request.
 ## 6. Reproducing the paper tables
 
 ### Quick smoke test (≈5 min on one GPU)
-```
+
+```bash
 python scripts/run_method.py \
   --backbone dlinear --datasets ETTh2 --seed 42 \
   --label_types mean_deg --output_dir ./outputs/smoke
@@ -100,17 +97,17 @@ with an `mse` field; the expected value is approximately 0.22.
 ### Full table reproduction
 
 **Table 1 — Main MSE results** (9 cells × 12 methods)
-```
+```bash
 bash scripts/reproduce_table1.sh
 ```
 
 **Table 2 — Trigger quality**
-```
+```bash
 bash scripts/reproduce_table2.sh ./results_table1 42
 ```
 
 **Table 3 — Ablation** (TimesNet × 3 cells × {PILOT, w/o Scorer, w/o History, w/o Stacking})
-```
+```bash
 bash scripts/reproduce_table3.sh
 ```
 
@@ -141,12 +138,12 @@ Reference runtimes on a single NVIDIA RTX 3090 (24 GB):
 | **Table 1** (9 cells) | — | ≈3–6 h |
 | **Table 3** (TimesNet × 3 cells × 4 variants) | — | ≈6–10 h |
 
-CPU-only runs are possible but several times slower; in that case we
-recommend starting from the quick smoke test above.
+CPU-only runs are possible but several times slower; 
+in that case we recommend starting from the quick smoke test above.
 
 ## 9. Code layout
 
-```
+```text
 code_supplement/
 ├── configs/
 │   └── backbone_arch.yaml        # per-cell backbone architecture
@@ -171,12 +168,12 @@ code_supplement/
 ## 10. License
 
 This supplement is released under the MIT License for review purposes.
-Vendored Time-Series-Library code under `tslib/` retains its original
-MIT license; see `tslib/LICENSE`.
+Vendored Time-Series-Library code under `tslib/` retains its original MIT license; 
+see `tslib/LICENSE`.
 
 ## References
 
-1. Time-Series-Library: https://github.com/thuml/Time-Series-Library
-2. Zeng et al., AAAI 2023 — DLinear
-3. Liu et al., ICLR 2024 — iTransformer
-4. Wu et al., ICLR 2023 — TimesNet
+[1] Time-Series-Library — <https://github.com/thuml/Time-Series-Library>  
+[2] DLinear — Zeng et al., "Are transformers effective for time series forecasting?," AAAI 2023.
+[3] iTransformer — Liu et al., "iTransformer: Inverted transformers are effective for time series forecasting," ICLR 2024.  
+[4] TimesNet — Wu et al., "Timesnet: Temporal 2d-variation modeling for general time series analysis," ICLR 2023.  
