@@ -174,6 +174,6 @@ see `tslib/LICENSE`.
 ## References
 
 [1] Time-Series-Library — <https://github.com/thuml/Time-Series-Library>  
-[2] DLinear — Zeng et al., "Are transformers effective for time series forecasting?," AAAI 2023.
+[2] DLinear — Zeng et al., "Are transformers effective for time series forecasting?," AAAI 2023.  
 [3] iTransformer — Liu et al., "iTransformer: Inverted transformers are effective for time series forecasting," ICLR 2024.  
 [4] TimesNet — Wu et al., "Timesnet: Temporal 2d-variation modeling for general time series analysis," ICLR 2023.  
