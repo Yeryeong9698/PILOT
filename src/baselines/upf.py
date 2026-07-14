@@ -1,8 +1,7 @@
 """
 UPF Reimplementation for Streaming Time-Series Forecasting
 ====================================================================
-Regol et al., "Towards Retraining-Free Adaptable Networks via Online Learning
-of Performance Forecasters", ICML 2025.
+Regol et al., "When to retrain a machine learning model", ICML 2025.
 
 Adaptations from the original:
   - Performance variable: MSE (unbounded) instead of bounded 0-1 accuracy
