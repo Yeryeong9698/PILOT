@@ -2,15 +2,14 @@
 
 
 <div align="center">
-    <h3>PILOT: Pseudo-Label Retraining from Forecast Errors for Online Time Series Forecasting</h3>
-    <!-- <h4>CIKM 2026 (submission)</h4> -->
+    <h3>Pseudo-Label-Triggered Retraining from Forecast Errors for Online Time Series Forecasting</h3>
     <!-- figure -->
     <!-- <br> -->
     <img src="https://anonymous.4open.science/r/PILOT-B641/pic/Overall_framework_of_PILOT.jpg" alt="PILOT Framework" width="600"/>
 
 </div>
 
-Code supplement for the CIKM 2026 submission.
+Code supplement for the submission.
 
 This supplement provides a self-contained reproducer covering **three datasets (ETTh2, ETTm1, Traffic)** across **three forecasting backbones (DLinear, iTransformer, TimesNet)** — nine (backbone, dataset) cells in total.  
 Configurations for the additional cells reported in the paper follow each backbone's original recommended training setup and are available upon request.
@@ -51,15 +50,15 @@ The backbone is trained on the first split only and shared across all retraining
 ```bash
 python scripts/run_method.py \
   --backbone timesnet --datasets ETTm1 --seed 42 \
-  --label_types mean_deg,cum_deg,rel_deg,binary_utility,ordinal_utility \
+  --label_types mean_deg \
   --benchmarks_dir ./data \
   --output_dir ./outputs/timesnet_ETTm1
 ```
 
-The command runs the full PILOT pipeline (five single-label scorers plus the voting variant) together with all six baselines (No Retrain,
-Periodic, ADWIN, KSWIN, CARA, UPF) on the specified cell.  
+The command runs the full PILOT pipeline together with all six baselines (No Retrain, Periodic, ADWIN, KSWIN, CARA, UPF) on the specified cell.  
 Per-method results are written to
 `./outputs/timesnet_ETTm1_<label>/results/<dataset>/<method>/seed_<N>/{metrics,predictions,retrains,alarms,tuned_params,config}.*`.
+You can use multiple `label_types` from `mean_deg,cum_deg,rel_deg,binary_utility,ordinal_utility` separated with comma, where `mean_deg` is the default pseudo-label type for PILOT. The others are extended alternatives.
 
 Each `metrics.json` contains the test-set `mse`, `mae`, `cumulative_mse`, `retrain_count`, and `alarm_count`.
 `tuned_params.json` records the hyperparameter selected on the validation split.
