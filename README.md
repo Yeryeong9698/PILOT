@@ -5,7 +5,8 @@
     <h3>Pseudo-Label-Triggered Retraining from Forecast Errors for Online Time Series Forecasting</h3>
     <!-- figure -->
     <!-- <br> -->
-    <img src="https://anonymous.4open.science/r/PILOT-B641/pic/Overall_framework_of_PILOT.jpg" alt="PILOT Framework" width="600"/>
+    <!-- <img src="https://anonymous.4open.science/r/PILOT-B641/pic/Overall_framework_of_PILOT.jpg" alt="PILOT Framework" width="700"/> -->
+    <img src="./pic/Overall_framework_of_PILOT.jpg" alt="PILOT Framework" width="700"/>
 
 </div>
 
